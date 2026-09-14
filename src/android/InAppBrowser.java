@@ -1178,7 +1178,7 @@ public class InAppBrowser extends CordovaPlugin {
                     dialog.setContentView(main);
                     dialog.show();
                     dialog.getWindow().setAttributes(lp);
-                    InAppBrowserInsets.apply(dialog, main, toolbarColor);
+                    InAppBrowserInsets.apply(dialog, main, toolbar, toolbarColor);
                 }
                 // the goal of openhidden is to load the url and not display it
                 // Show() needs to be called to cause the URL to be loaded

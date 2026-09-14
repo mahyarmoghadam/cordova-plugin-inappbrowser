@@ -39,6 +39,10 @@ import android.view.WindowManager;
  * sits below the status bar while the web view reaches the bottom edge of the screen,
  * mirroring CDVWKInAppBrowser.m, where the toolbar is pinned to safeAreaLayoutGuide.topAnchor
  * and the web view to the bottom edge of the view.
+ *
+ * The horizontal insets a display cutout adds in landscape are likewise kept off the browser as
+ * a whole and applied to the toolbar alone: the browser fills the display edge to edge, and only
+ * the toolbar's buttons and url stay clear of the cutout.
  */
 final class InAppBrowserInsets {
 
@@ -48,10 +52,11 @@ final class InAppBrowserInsets {
     /**
      * @param dialog   the dialog the In-App-Browser is shown in, already visible
      * @param content  the browser's root layout, holding the toolbar and the web view
+     * @param toolbar  the toolbar, whose buttons have to stay clear of a display cutout, or null
      * @param barColor the toolbar colour, also used for the strip behind the status bar
      */
     @SuppressLint("NewApi")
-    static void apply(final Dialog dialog, final View content, final int barColor) {
+    static void apply(final Dialog dialog, final View content, final View toolbar, final int barColor) {
         if (dialog == null || content == null) {
             return;
         }
@@ -74,6 +79,23 @@ final class InAppBrowserInsets {
         window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
             | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
             | WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // A window left on the default cutout mode may only extend into the display cutout
+            // while the cutout is fully covered by a system bar. In portrait the cutout sits
+            // behind the status bar and the dialog spans the display, but in landscape the
+            // cutout moves to a side where nothing covers it, and the framework letterboxes the
+            // window away from that edge: "dumpsys window" then reports frame=[142,0][2424,1080]
+            // instead of [0,0][2424,1080], and the app behind shows through the gap that leaves.
+            // The Cordova activity window is already laid out with
+            // layoutInDisplayCutoutMode=always, so the dialog has to ask for the same to reach
+            // the edge of the screen in every orientation.
+            final WindowManager.LayoutParams cutoutAttributes = window.getAttributes();
+            cutoutAttributes.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            window.setAttributes(cutoutAttributes);
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Fit no inset type at all, so the frame becomes the full display and the insets
@@ -98,6 +120,13 @@ final class InAppBrowserInsets {
         content.setFitsSystemWindows(false);
         applyStatusBarIconContrast(window, barColor);
 
+        // The toolbar lays its buttons out inside a padding of its own, which the cutout inset
+        // is added to rather than replacing.
+        final int toolbarPaddingLeft = toolbar == null ? 0 : toolbar.getPaddingLeft();
+        final int toolbarPaddingTop = toolbar == null ? 0 : toolbar.getPaddingTop();
+        final int toolbarPaddingRight = toolbar == null ? 0 : toolbar.getPaddingRight();
+        final int toolbarPaddingBottom = toolbar == null ? 0 : toolbar.getPaddingBottom();
+
         content.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override
             @SuppressLint("NewApi")
@@ -121,8 +150,17 @@ final class InAppBrowserInsets {
                     // system window inset adds on top of the stable navigation bar is the keyboard.
                     keyboard = Math.max(0, insets.getSystemWindowInsetBottom() - insets.getStableInsetBottom());
                 }
-                // The bottom stays at the screen edge unless the keyboard would cover the content.
-                view.setPadding(left, top, right, keyboard);
+                // The browser keeps both side edges of the screen, and keeps the bottom one
+                // unless the keyboard would cover the content. Only the toolbar moves out of the
+                // way of a cutout, so the web view stays full screen in landscape too.
+                view.setPadding(0, top, 0, keyboard);
+                if (toolbar != null) {
+                    toolbar.setPadding(
+                        toolbarPaddingLeft + left,
+                        toolbarPaddingTop,
+                        toolbarPaddingRight + right,
+                        toolbarPaddingBottom);
+                }
                 return insets;
             }
         });
